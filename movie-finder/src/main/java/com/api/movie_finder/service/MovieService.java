@@ -4,6 +4,7 @@ import com.api.movie_finder.dto.MovieDto;
 import com.api.movie_finder.model.Movie;
 import com.api.movie_finder.repository.MovieRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -38,6 +39,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 @Service
+@Slf4j
 public class MovieService {
 
     @Autowired
@@ -69,6 +71,10 @@ public class MovieService {
     public void uploadNewMovie(MultipartFile file, // mp4
                                MultipartFile preview,
                                MovieDto dto) throws Exception {
+        // Начали таймер
+        long start = System.currentTimeMillis();
+        log.info("Начали таймер перед обрезанием!");
+
         // маппим данные и также сохраняем preview и ставим его в imgUrl
         Movie movie = new Movie();
         movie.setName(dto.getName());
@@ -135,6 +141,12 @@ public class MovieService {
             fullPathPhotos.put(fullPath.toString(), entry.getValue());
         }
 
+        long end = System.currentTimeMillis();
+        long duration = end - start;
+
+        log.info("Операция на Java выполнена за: " + (duration / 1000.0) + " секунд!");
+        System.out.println("⏳ Выполнено за " + (duration / 1000.0) + " секунд.");
+
         RestTemplate restTemplate = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -143,8 +155,6 @@ public class MovieService {
 
         org.springframework.http.ResponseEntity<Void> response =
                 restTemplate.postForEntity("http://localhost:8463/upload", request, Void.class);
-
-
     }
 
 }

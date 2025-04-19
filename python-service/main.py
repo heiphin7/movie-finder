@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict
 import torch
+import httpx
 import open_clip
 import faiss
 from PIL import Image
@@ -83,6 +84,15 @@ async def upload_vectors(data: Dict[str, Dict[str, int]]):
     with open(META_PATH, "w", encoding="utf-8") as f:
         json.dump(metadata_store, f, ensure_ascii=False, indent=2)
 
+    # === 🔁 Уведомляем Java-сервис об удалении файлов ===
+    try:
+        async with httpx.AsyncClient() as client:
+            java_url = "http://localhost:5720/files/delete"  # Измени на нужный host:port
+            await client.post(java_url, json=data, timeout=10)
+            print("✅ Уведомление об удалении файлов отправлено в Java-сервис")
+    except Exception as e:
+        print(f"⚠️ Не удалось отправить запрос на удаление: {e}")
+
     return {"status": "uploaded", "count": len(metadata_store)}
 
 
@@ -100,7 +110,7 @@ async def find_image(image: UploadFile = File(...)):
     index = I[0][0]
     distance = D[0][0]
 
-    if index < 0 or distance > 0.3:  # Порог
+    if index < 0 or distance > 0.5:  # Порог
         return JSONResponse(content={"result": None})
 
     meta = metadata_store[index]
