@@ -4,3 +4,5 @@ torch
 open_clip_torch
 Pillow
 python-multipart
+faiss-cpu
+httpx
