@@ -33,10 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 @Service
 @Slf4j
@@ -68,64 +65,63 @@ public class MovieService {
     }
 
     @Transactional
-    public void uploadNewMovie(MultipartFile file, // mp4
-                               MultipartFile preview,
-                               MovieDto dto) throws Exception {
-        // Начали таймер
+    public void uploadNewMovie(MultipartFile file, MultipartFile preview, MovieDto dto) throws Exception {
         long start = System.currentTimeMillis();
         log.info("Начали таймер перед обрезанием!");
 
-        // маппим данные и также сохраняем preview и ставим его в imgUrl
+        // === Сохраняем movie и превью ===
         Movie movie = new Movie();
         movie.setName(dto.getName());
         movie.setDescription(dto.getDescription());
         movie.setRating(dto.getRating());
 
         Path previewPath = Path.of("C:\\Users\\rshal\\.privateProjects\\movie-finder\\movie-finder\\src\\main\\resources\\images\\previews");
-
+        Files.createDirectories(previewPath);
         preview.transferTo(previewPath.resolve(preview.getOriginalFilename()));
         movie.setImgUrl("/images/previews/" + preview.getOriginalFilename());
         movieRepository.save(movie);
 
-        /*
-            Дальше нужно каждый второй кадр сохранить и передать на python-service
-            почему каждый второй? -> для оптимизации. Если бы мы каждый кадр сохраняли то это сильно
-            било бы по производительности, но все еще от этого есть шанс что нужный (!ключевой) кадр
-            может не сохраниться
-        */
-
+        // === Подготовка директорий и временного файла ===
         Path outputDir = Path.of("C:\\Users\\rshal\\.privateProjects\\movie-finder\\movie-finder\\src\\main\\resources\\images\\screenshots");
-        Files.createDirectories(outputDir); // если нет — создаём
+        Files.createDirectories(outputDir);
 
-// Сохраняем входной файл во временный .mp4
         File tempVideo = File.createTempFile("video", ".mp4");
         file.transferTo(tempVideo);
 
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(tempVideo);
-        Map<String, Map<String, Integer>> fullPathPhotos = new HashMap<>();
         Java2DFrameConverter converter = new Java2DFrameConverter();
+        Map<String, Map<String, Integer>> fullPathPhotos = new ConcurrentHashMap<>();
+
+        ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
         try {
             grabber.start();
 
-            double duration = grabber.getLengthInTime() / 1_000_000.0; // сек
-            int intervalSeconds = 1;
+            int frameRate = (int) grabber.getFrameRate(); // Примерно 25–30
+            int frameNumber = 0;
+            int secondsPassed = 0;
 
-            for (int sec = 0; sec < (int) duration; sec += intervalSeconds) {
-                grabber.setTimestamp(sec * 1_000_000L);
+            Frame frame;
+            while ((frame = grabber.grabImage()) != null) {
+                if (frameNumber % frameRate == 0) { // Каждую секунду
+                    BufferedImage bi = converter.convert(frame);
+                    int finalSec = secondsPassed;
+                    secondsPassed++;
 
-                Frame frame = grabber.grabImage();
-                if (frame == null) continue;
+                    executor.submit(() -> {
+                        try {
+                            UUID id = UUID.randomUUID();
+                            String fileName = "frame_" + finalSec + "_" + id + ".png";
+                            Path imagePath = outputDir.resolve(fileName);
+                            ImageIO.write(bi, "png", imagePath.toFile());
 
-                BufferedImage bi = converter.convert(frame);
-                UUID id = UUID.randomUUID();
-                String fileName = "frame_" + sec + "_" + id + ".png";
-
-                Path imagePath = outputDir.resolve(fileName);
-                ImageIO.write(bi, "png", imagePath.toFile());
-
-                // 🔄 Сохраняем сразу полный путь
-                fullPathPhotos.put(imagePath.toAbsolutePath().toString(), Map.of(movie.getName(), sec));
+                            fullPathPhotos.put(imagePath.toAbsolutePath().toString(), Map.of(movie.getName(), finalSec));
+                        } catch (IOException e) {
+                            log.error("Ошибка при сохранении кадра: " + e.getMessage());
+                        }
+                    });
+                }
+                frameNumber++;
             }
 
             grabber.stop();
@@ -134,20 +130,23 @@ public class MovieService {
             tempVideo.delete();
         }
 
+        executor.shutdown();
+        executor.awaitTermination(10, TimeUnit.MINUTES); // ждем завершения
+
         long end = System.currentTimeMillis();
         long duration = end - start;
 
-        log.info("Операция на Java выполнена за: " + (duration / 1000.0) + " секунд!");
-        System.out.println("Выполнено за " + (duration / 1000.0) + " секунд.");
+        log.info("Кадры успешно обработаны за " + (duration / 1000.0) + " сек");
 
+        // === Отправляем данные в Python-сервис ===
         RestTemplate restTemplate = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        org.springframework.http.HttpEntity<Map<String, Map<String, Integer>>> request =
-                new org.springframework.http.HttpEntity<>(fullPathPhotos, headers); // todo поменять fullPathPhotos
+        org.springframework.http.HttpEntity<java.util.Map<String, java.util.Map<String, java.lang.Integer>>> request =
+                new org.springframework.http.HttpEntity<>(fullPathPhotos, headers);
 
-        org.springframework.http.ResponseEntity<Void> response =
-                restTemplate.postForEntity("http://localhost:8463/upload", request, Void.class);
+        ResponseEntity<Void> response = restTemplate.postForEntity("http://localhost:8463/upload", request, Void.class);
+        log.info("Данные отправлены в python-service");
     }
 
 }
