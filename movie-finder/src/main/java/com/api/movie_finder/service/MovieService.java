@@ -133,6 +133,12 @@ public class MovieService {
             tempVideo.delete();
         }
 
+        long end = System.currentTimeMillis();
+        long duration = end - start;
+
+        log.info("Операция на Java выполнена за: " + (duration / 1000.0) + " секунд!");
+        System.out.println("⏳ Выполнено за " + (duration / 1000.0) + " секунд.");
+
         Map<String, Map<String, Integer>> fullPathPhotos = new HashMap<>();
 
         for (Map.Entry<String, Map<String, Integer>> entry : photos.entrySet()) {
@@ -140,12 +146,6 @@ public class MovieService {
             Path fullPath = outputDir.resolve(fileName).toAbsolutePath();
             fullPathPhotos.put(fullPath.toString(), entry.getValue());
         }
-
-        long end = System.currentTimeMillis();
-        long duration = end - start;
-
-        log.info("Операция на Java выполнена за: " + (duration / 1000.0) + " секунд!");
-        System.out.println("⏳ Выполнено за " + (duration / 1000.0) + " секунд.");
 
         RestTemplate restTemplate = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
