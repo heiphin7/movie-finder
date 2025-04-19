@@ -97,12 +97,12 @@ public class MovieService {
         Path outputDir = Path.of("C:\\Users\\rshal\\.privateProjects\\movie-finder\\movie-finder\\src\\main\\resources\\images\\screenshots");
         Files.createDirectories(outputDir); // если нет — создаём
 
-        // Сохраняем входной файл во временный .mp4
+// Сохраняем входной файл во временный .mp4
         File tempVideo = File.createTempFile("video", ".mp4");
         file.transferTo(tempVideo);
 
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(tempVideo);
-        Map<String, Map<String, Integer>> photos = new HashMap<>();
+        Map<String, Map<String, Integer>> fullPathPhotos = new HashMap<>();
         Java2DFrameConverter converter = new Java2DFrameConverter();
 
         try {
@@ -124,7 +124,8 @@ public class MovieService {
                 Path imagePath = outputDir.resolve(fileName);
                 ImageIO.write(bi, "png", imagePath.toFile());
 
-                photos.put(fileName, Map.of(movie.getName(), sec));
+                // 🔄 Сохраняем сразу полный путь
+                fullPathPhotos.put(imagePath.toAbsolutePath().toString(), Map.of(movie.getName(), sec));
             }
 
             grabber.stop();
@@ -137,21 +138,13 @@ public class MovieService {
         long duration = end - start;
 
         log.info("Операция на Java выполнена за: " + (duration / 1000.0) + " секунд!");
-        System.out.println("⏳ Выполнено за " + (duration / 1000.0) + " секунд.");
-
-        Map<String, Map<String, Integer>> fullPathPhotos = new HashMap<>();
-
-        for (Map.Entry<String, Map<String, Integer>> entry : photos.entrySet()) {
-            String fileName = entry.getKey();
-            Path fullPath = outputDir.resolve(fileName).toAbsolutePath();
-            fullPathPhotos.put(fullPath.toString(), entry.getValue());
-        }
+        System.out.println("Выполнено за " + (duration / 1000.0) + " секунд.");
 
         RestTemplate restTemplate = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         org.springframework.http.HttpEntity<Map<String, Map<String, Integer>>> request =
-                new org.springframework.http.HttpEntity<>(fullPathPhotos, headers);
+                new org.springframework.http.HttpEntity<>(fullPathPhotos, headers); // todo поменять fullPathPhotos
 
         org.springframework.http.ResponseEntity<Void> response =
                 restTemplate.postForEntity("http://localhost:8463/upload", request, Void.class);
